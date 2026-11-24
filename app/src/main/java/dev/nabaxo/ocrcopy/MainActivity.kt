@@ -51,6 +51,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -418,6 +419,7 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     var zoom by remember(scan) { mutableFloatStateOf(1f) }
     var pan by remember(scan) { mutableStateOf(Offset.Zero) }
     var viewSize by remember { mutableStateOf(Size.Zero) }
+    var chipSize by remember { mutableStateOf(IntSize.Zero) }
     val accent = overlayColor()
     // Corner rounding / merge distance for the gooey shapes, in image pixels.
     val gooeyRadius = scan.textHeight * 0.3f
@@ -631,6 +633,47 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     val r = handleRadius / zoom
                     drawPath(teardropHandle(start, r, isStart = true), accent)
                     drawPath(teardropHandle(end, r, isStart = false), accent)
+                }
+            }
+
+            // Floating Copy chip above the selection, like the system text popup but with
+            // only Copy (no web search / Lens / other apps' actions). Drawn outside the
+            // zoomed layer so it keeps its size; flips below the selection if there's no
+            // room above.
+            val chipRange = selection
+            if (chipRange != null && viewSize != Size.Zero) {
+                val f = fit()
+                val onScreen = selectionQuads(glyphs, chipRange).flatten().map { f.toView(it) * zoom + pan }
+                val top = onScreen.minOf { it.y }
+                val bottom = onScreen.maxOf { it.y }
+                val centerX = (onScreen.minOf { it.x } + onScreen.maxOf { it.x }) / 2f
+                val gap = with(density) { 8.dp.toPx() }
+
+                Surface(
+                    onClick = { copyToClipboard(context, text) },
+                    modifier = Modifier
+                        .onSizeChanged { chipSize = it }
+                        .offset {
+                            val above = top - chipSize.height - gap
+                            // Below: clear the teardrop handles too.
+                            val below = bottom + handleRadius * 2f + gap
+                            val y = if (above >= 0f) above else below
+                            val maxX = (viewSize.width - chipSize.width).coerceAtLeast(0f)
+                            val x = (centerX - chipSize.width / 2f).coerceIn(0f, maxX)
+                            IntOffset(x.roundToInt(), y.roundToInt())
+                        },
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    shadowElevation = 3.dp,
+                ) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Copy", style = MaterialTheme.typography.labelLarge)
+                    }
                 }
             }
 
