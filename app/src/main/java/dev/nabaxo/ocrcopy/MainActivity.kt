@@ -123,6 +123,12 @@ import kotlin.math.sqrt
 private const val MAX_BITMAP_BYTES = 90L * 1024 * 1024
 private const val MAX_ZOOM = 8f
 
+/**
+ * Bottom panel height, same on the camera and selection screens so the picture area is
+ * identical on both. Fits 3 lines of selected text plus the buttons.
+ */
+private val BOTTOM_PANEL_HEIGHT = 176.dp
+
 /** Dims the photo everywhere except detected text lines (ARGB: 50% black). */
 private const val ScrimArgb = 0x80000000.toInt()
 
@@ -272,64 +278,80 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
         onDispose { cameraProvider?.unbindAll() }
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                val previewView = PreviewView(ctx)
-                val providerFuture = ProcessCameraProvider.getInstance(ctx)
-                providerFuture.addListener({
-                    val provider = providerFuture.get()
-                    val preview = Preview.Builder().build()
-                    preview.setSurfaceProvider(previewView.surfaceProvider)
-                    provider.unbindAll()
-                    provider.bindToLifecycle(
-                        lifecycleOwner,
-                        CameraSelector.DEFAULT_BACK_CAMERA,
-                        preview,
-                        imageCapture,
-                    )
-                    cameraProvider = provider
-                }, ContextCompat.getMainExecutor(ctx))
-                previewView
-            },
-        )
-
-        Surface(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 16.dp),
-            shape = CircleShape,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        ) {
-            Text(
-                if (busy) "Reading text…" else "Point at text, then tap the shutter",
-                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+    // Same layout as SelectScreen (status bar, picture area, fixed-height bottom panel) and
+    // FIT_CENTER, so the frozen photo appears exactly where the viewfinder showed it.
+    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx)
+                    previewView.scaleType = PreviewView.ScaleType.FIT_CENTER
+                    val providerFuture = ProcessCameraProvider.getInstance(ctx)
+                    providerFuture.addListener({
+                        val provider = providerFuture.get()
+                        // Same 4:3 shape as the photo, so both show the same field of view.
+                        val preview = Preview.Builder()
+                            .setResolutionSelector(
+                                ResolutionSelector.Builder()
+                                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                                    .build(),
+                            )
+                            .build()
+                        preview.setSurfaceProvider(previewView.surfaceProvider)
+                        provider.unbindAll()
+                        provider.bindToLifecycle(
+                            lifecycleOwner,
+                            CameraSelector.DEFAULT_BACK_CAMERA,
+                            preview,
+                            imageCapture,
+                        )
+                        cameraProvider = provider
+                    }, ContextCompat.getMainExecutor(ctx))
+                    previewView
+                },
             )
+
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 16.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ) {
+                Text(
+                    if (busy) "Reading text…" else "Point at text, then tap the shutter",
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
 
         Box(
             Modifier
-                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
                 .navigationBarsPadding()
-                .padding(bottom = 32.dp)
-                .size(76.dp)
-                .border(4.dp, Color.White, CircleShape)
-                .padding(8.dp)
-                .clip(CircleShape)
-                .background(if (busy) Color.Gray else Color.White)
-                .clickable(enabled = !busy) { onShutter(imageCapture) },
+                .height(BOTTOM_PANEL_HEIGHT),
             contentAlignment = Alignment.Center,
         ) {
-            if (busy) {
-                CircularProgressIndicator(
-                    Modifier.size(32.dp),
-                    color = MaterialTheme.colorScheme.primary,
-                    strokeWidth = 3.dp,
-                )
+            Box(
+                Modifier
+                    .size(76.dp)
+                    .border(4.dp, Color.White, CircleShape)
+                    .padding(8.dp)
+                    .clip(CircleShape)
+                    .background(if (busy) Color.Gray else Color.White)
+                    .clickable(enabled = !busy) { onShutter(imageCapture) },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(
+                        Modifier.size(32.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 3.dp,
+                    )
+                }
             }
         }
     }
@@ -557,12 +579,16 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
         }
 
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            // Fixed height (matches CameraScreen) so the photo area never changes size,
+            // whatever is selected.
             Column(
                 Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
+                    .height(BOTTOM_PANEL_HEIGHT)
                     .padding(horizontal = 24.dp, vertical = 16.dp),
             ) {
+                val textModifier = Modifier.weight(1f).fillMaxWidth()
                 if (text.isEmpty()) {
                     val hint = if (glyphs.isEmpty()) {
                         "No text found. Retake."
@@ -571,15 +597,16 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     }
                     Text(
                         hint,
+                        modifier = textModifier,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
                     Text(
                         text,
+                        modifier = textModifier,
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 4,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
