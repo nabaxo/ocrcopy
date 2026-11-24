@@ -27,6 +27,9 @@ import androidx.camera.core.resolutionselector.ResolutionSelector
 import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -76,6 +79,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -312,19 +316,43 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
                 },
             )
 
-            Surface(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 16.dp),
-                shape = CircleShape,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            ) {
+            // Fade the viewfinder to black while capturing and reading. SelectScreen fades
+            // in from black, which hides the stall when the big photo is first drawn.
+            val blackout by animateFloatAsState(
+                targetValue = if (busy) 1f else 0f,
+                animationSpec = tween(durationMillis = 200),
+                label = "blackout",
+            )
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = blackout }
+                    .background(Color.Black),
+            )
+
+            if (busy) {
+                // Centered over the blacked-out viewfinder.
                 Text(
-                    if (busy) "Reading text…" else "Point at text, then tap the shutter",
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    "Reading text…",
+                    modifier = Modifier.align(Alignment.Center),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
                 )
+            } else {
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 16.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    Text(
+                        "Point at text, then tap the shutter",
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
         }
 
@@ -381,6 +409,15 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
             image.width, image.height, scan.lineQuads, gooeyRadius,
             inside = 0x00000000, outside = ScrimArgb,
         ).asImageBitmap()
+    }
+    // Fade in from black. The first draw of a full-resolution photo uploads ~50 MB to the
+    // GPU and stalls for a few hundred ms; wait two frames so that has happened behind the
+    // black, otherwise the fade would be over before anything is shown.
+    val blackout = remember(scan) { Animatable(1f) }
+    LaunchedEffect(scan) {
+        withFrameNanos { }
+        withFrameNanos { }
+        blackout.animateTo(0f, tween(durationMillis = 300))
     }
     val density = LocalDensity.current
     val handleRadius = with(density) { 11.dp.toPx() }
@@ -576,6 +613,15 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     drawPath(teardropHandle(end, r, isStart = false), accent)
                 }
             }
+
+            // Starts black (the viewfinder faded to black) and fades out once the photo
+            // has really been drawn.
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .graphicsLayer { alpha = blackout.value }
+                    .background(Color.Black),
+            )
         }
 
         Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
