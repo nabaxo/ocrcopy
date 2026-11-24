@@ -114,6 +114,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import java.util.concurrent.Executors
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -194,9 +195,22 @@ private fun App() {
         if (!hasCameraPermission) permissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
-    val recognizer = remember { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
+    val recognizer = remember {
+        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS).also { client ->
+            // ML Kit loads its model lazily on the first call. Do that now, while the user
+            // is still aiming, instead of after the shutter tap. Result is ignored.
+            val blank = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+            client.process(InputImage.fromBitmap(blank, 0))
+        }
+    }
+    // Photo decoding and rotation (~100-300 ms on a 12.5 MP photo) run here, not on the
+    // main thread, so the UI doesn't freeze at capture.
+    val captureExecutor = remember { Executors.newSingleThreadExecutor() }
     DisposableEffect(Unit) {
-        onDispose { recognizer.close() }
+        onDispose {
+            recognizer.close()
+            captureExecutor.shutdown()
+        }
     }
 
     var scan by remember { mutableStateOf<Scan?>(null) }
@@ -204,10 +218,13 @@ private fun App() {
 
     fun capture(imageCapture: ImageCapture) {
         busy = true
+        val mainExecutor = ContextCompat.getMainExecutor(context)
         val callback = object : ImageCapture.OnImageCapturedCallback() {
+            // Runs on captureExecutor.
             override fun onCaptureSuccess(image: ImageProxy) {
                 val bitmap = uprightBitmap(image)
                 image.close()
+                // ML Kit calls these listeners on the main thread.
                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
                     .addOnSuccessListener { text ->
                         scan = buildScan(bitmap, text)
@@ -219,12 +236,15 @@ private fun App() {
                     }
             }
 
+            // Runs on captureExecutor; toasts need the main thread.
             override fun onError(exception: ImageCaptureException) {
-                toast(context, "Capture failed: ${exception.message}")
-                busy = false
+                mainExecutor.execute {
+                    toast(context, "Capture failed: ${exception.message}")
+                    busy = false
+                }
             }
         }
-        imageCapture.takePicture(ContextCompat.getMainExecutor(context), callback)
+        imageCapture.takePicture(captureExecutor, callback)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -747,7 +767,11 @@ private fun uprightBitmap(image: ImageProxy): Bitmap {
         postRotate(rotation.toFloat())
         postScale(scale, scale)
     }
-    return Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+    val upright = Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, matrix, true)
+    // Free the ~50 MB original now instead of waiting for GC. createBitmap can return the
+    // same object when nothing changes, so only recycle a real copy.
+    if (upright !== raw) raw.recycle()
+    return upright
 }
 
 private fun copyToClipboard(context: Context, text: String) {
