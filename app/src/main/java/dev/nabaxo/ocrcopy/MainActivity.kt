@@ -85,6 +85,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
@@ -348,7 +349,6 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     var pan by remember(scan) { mutableStateOf(Offset.Zero) }
     var viewSize by remember { mutableStateOf(Size.Zero) }
     val accent = overlayColor()
-    val highlightColor = accent.copy(alpha = 0.4f)
     // Corner rounding / merge distance for the gooey shapes, in image pixels.
     val gooeyRadius = scan.textHeight * 0.3f
 
@@ -510,12 +510,13 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
 
                 val range = selection
                 if (range != null) {
-                    // One rounded shape per selected line; not merged.
+                    // One rounded shape per selected line; not merged. Multiply works like a
+                    // highlighter pen: paper takes the color, dark text stays dark.
                     val highlight = Path()
                     for (quad in selectionQuads(glyphs, range)) {
                         highlight.addRoundedPolygon(quad.map { f.toView(it) }, gooeyRadius * f.scale)
                     }
-                    drawPath(highlight, highlightColor)
+                    drawPath(highlight, accent, blendMode = BlendMode.Multiply)
                     val (start, end) = handleAnchors(range)
                     val r = handleRadius / zoom
                     drawPath(teardropHandle(start, r, isStart = true), accent)
