@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="432" height="432">
+  <rect width="108" height="108" fill="#1E88E5"/>
+
+  <!-- Viewfinder corners -->
+  <g fill="none" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M26 37 V26 H37"/>
+    <path d="M71 26 H82 V37"/>
+    <path d="M26 71 V82 H37"/>
+    <path d="M82 71 V82 H71"/>
+  </g>
+
+  <!-- Selected "Aa" with highlight and handles -->
+  <rect x="34" y="40" width="40" height="26" rx="3" fill="#FFD54F"/>
+  <text x="54" y="61" text-anchor="middle" font-family="DejaVu Sans, sans-serif" font-weight="bold" font-size="22" fill="#0D47A1">Aa</text>
+  <circle cx="34" cy="70" r="4" fill="#FFD54F"/>
+  <circle cx="74" cy="70" r="4" fill="#FFD54F"/>
+</svg>

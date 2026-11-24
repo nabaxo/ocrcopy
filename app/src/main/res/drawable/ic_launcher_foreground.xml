@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 108dp adaptive icon canvas. Everything stays inside the 66dp safe circle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Viewfinder corners -->
+    <path
+        android:pathData="M32,41 V32 H41 M67,32 H76 V41 M32,67 V76 H41 M76,67 V76 H67"
+        android:strokeColor="@color/ic_launcher_fg"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+
+    <!-- Selection highlight -->
+    <path
+        android:pathData="M40,46 H68 A2,2 0 0 1 70,48 V54 A2,2 0 0 1 68,56 H40 A2,2 0 0 1 38,54 V48 A2,2 0 0 1 40,46 Z"
+        android:fillColor="@color/ic_launcher_accent"
+        android:fillAlpha="0.45" />
+
+    <!-- Text line -->
+    <path
+        android:pathData="M42.5,48.5 H65.5 A2.5,2.5 0 0 1 65.5,53.5 H42.5 A2.5,2.5 0 0 1 42.5,48.5 Z"
+        android:fillColor="@color/ic_launcher_fg" />
+
+    <!-- Selection handles -->
+    <path
+        android:pathData="M34.5,59.5 A3.5,3.5 0 1 0 41.5,59.5 A3.5,3.5 0 1 0 34.5,59.5 Z M66.5,59.5 A3.5,3.5 0 1 0 73.5,59.5 A3.5,3.5 0 1 0 66.5,59.5 Z"
+        android:fillColor="@color/ic_launcher_accent" />
+</vector>

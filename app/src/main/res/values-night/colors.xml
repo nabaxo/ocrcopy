@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon, dark system theme -->
+    <color name="ic_launcher_background">#16212E</color>
+    <color name="ic_launcher_fg">#FFFFFF</color>
+    <color name="ic_launcher_accent">#33B5E5</color>
+</resources>
