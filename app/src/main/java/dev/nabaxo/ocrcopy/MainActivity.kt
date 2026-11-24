@@ -427,16 +427,18 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     }
                     // Pointer positions below arrive in canvas coords (zoom/pan already undone).
                     .pointerInput(scan) {
+                        fun selectWordAt(pos: Offset) {
+                            val f = fit()
+                            val maxDistance = grabRadius / zoom / f.scale
+                            val hit = glyphAt(glyphs, f.toImage(pos), maxDistance)
+                            if (hit != null) {
+                                selection = wordRange(glyphs, hit)
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                        }
                         detectTapGestures(
-                            onLongPress = { pos ->
-                                val f = fit()
-                                val maxDistance = grabRadius / zoom / f.scale
-                                val hit = glyphAt(glyphs, f.toImage(pos), maxDistance)
-                                if (hit != null) {
-                                    selection = wordRange(glyphs, hit)
-                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                                }
-                            },
+                            onLongPress = { pos -> selectWordAt(pos) },
+                            onDoubleTap = { pos -> selectWordAt(pos) },
                             onTap = { pos ->
                                 val range = selection ?: return@detectTapGestures
                                 val (start, end) = handleCenters(range)
@@ -536,7 +538,7 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     val hint = if (glyphs.isEmpty()) {
                         "No text found. Retake."
                     } else {
-                        "Long-press a word, drag the handles. Pinch to zoom."
+                        "Long-press or double-tap a word, drag the handles. Pinch to zoom."
                     }
                     Text(
                         hint,
