@@ -22,6 +22,9 @@ import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.Canvas
@@ -109,9 +112,14 @@ import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
-/** Photos are shrunk to this long side before OCR. Plenty for text, keeps memory sane. */
-private const val MAX_IMAGE_SIDE = 3000
+/**
+ * Photos are kept at full camera resolution unless the bitmap would exceed this size.
+ * Android refuses to draw bitmaps over 100 MB ("trying to draw too large bitmap"), on any
+ * phone, so stay under that. A 12.5 MP Pixel 8 Pro photo is ~50 MB and is never shrunk.
+ */
+private const val MAX_BITMAP_BYTES = 90L * 1024 * 1024
 private const val MAX_ZOOM = 8f
 
 /** Dims the photo everywhere except detected text lines (ARGB: 50% black). */
@@ -246,7 +254,14 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     val imageCapture = remember {
         ImageCapture.Builder()
-            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            // Biggest 4:3 photo the camera offers (Pixel 8 Pro: ~4080x3072).
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+                    .setResolutionStrategy(ResolutionStrategy.HIGHEST_AVAILABLE_STRATEGY)
+                    .build(),
+            )
             .build()
     }
 
@@ -619,8 +634,8 @@ private fun teardropHandle(anchor: Offset, radius: Float, isStart: Boolean): Pat
 private fun uprightBitmap(image: ImageProxy): Bitmap {
     val raw = image.toBitmap()
     val rotation = image.imageInfo.rotationDegrees
-    val longSide = max(raw.width, raw.height)
-    val scale = if (longSide > MAX_IMAGE_SIDE) MAX_IMAGE_SIDE.toFloat() / longSide else 1f
+    val bytes = raw.width.toLong() * raw.height * 4 // ARGB_8888
+    val scale = if (bytes > MAX_BITMAP_BYTES) sqrt(MAX_BITMAP_BYTES.toFloat() / bytes) else 1f
     if (rotation == 0 && scale == 1f) return raw
 
     val matrix = Matrix().apply {
