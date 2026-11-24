@@ -281,6 +281,22 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
             },
         )
 
+        Surface(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 16.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            Text(
+                if (busy) "Reading text…" else "Point at text, then tap the shutter",
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
         Box(
             Modifier
                 .align(Alignment.BottomCenter)
