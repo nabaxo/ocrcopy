@@ -11,6 +11,8 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -26,6 +28,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateCentroid
@@ -45,14 +48,23 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,14 +77,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -100,19 +116,49 @@ import kotlin.math.roundToInt
 private const val MAX_IMAGE_SIDE = 3000
 private const val MAX_ZOOM = 8f
 
-private val HighlightColor = Color(0x6633B5E5)
-private val HandleColor = Color(0xFF33B5E5)
-private val WordOutlineColor = Color(0x66FFFFFF)
+/** Dims the photo everywhere except detected text lines. */
+private val ScrimColor = Color(0x80000000)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Top of every screen is camera/photo (black), so status bar icons are always light.
+        enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
+            OcrCopyTheme {
                 App()
             }
         }
     }
+}
+
+/** Material 3. Wallpaper-based dynamic color on Android 12+, follows system light/dark. */
+@Composable
+private fun OcrCopyTheme(content: @Composable () -> Unit) {
+    val context = LocalContext.current
+    val dark = isSystemInDarkTheme()
+    val colors = when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && dark -> dynamicDarkColorScheme(context)
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> dynamicLightColorScheme(context)
+        dark -> darkColorScheme()
+        else -> lightColorScheme()
+    }
+    MaterialTheme(colorScheme = colors, content = content)
+}
+
+/**
+ * Color for things drawn on top of the photo. The photo area is dark-ish regardless of
+ * app theme, so always use the dark scheme's primary (a light tone) for contrast.
+ */
+@Composable
+private fun overlayColor(): Color {
+    val context = LocalContext.current
+    val darkScheme = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        dynamicDarkColorScheme(context)
+    } else {
+        darkColorScheme()
+    }
+    return darkScheme.primary
 }
 
 @Composable
@@ -164,7 +210,7 @@ private fun App() {
         imageCapture.takePicture(ContextCompat.getMainExecutor(context), callback)
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black)) {
+    Box(Modifier.fillMaxSize()) {
         val currentScan = scan
         when {
             !hasCameraPermission -> PermissionScreen(
@@ -178,14 +224,22 @@ private fun App() {
 
 @Composable
 private fun PermissionScreen(onRequest: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().padding(24.dp),
-        verticalArrangement = Arrangement.Center,
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Camera permission is needed to read text.", color = Color.White)
-        Spacer(Modifier.height(16.dp))
-        Button(onClick = onRequest) { Text("Grant camera") }
+    Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(
+            Modifier.fillMaxSize().padding(24.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Camera access", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "OCR Copy needs the camera to read text. Nothing leaves your phone.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(24.dp))
+            Button(onClick = onRequest) { Text("Grant camera access") }
+        }
     }
 }
 
@@ -204,7 +258,7 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
         onDispose { cameraProvider?.unbindAll() }
     }
 
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -240,7 +294,13 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
                 .clickable(enabled = !busy) { onShutter(imageCapture) },
             contentAlignment = Alignment.Center,
         ) {
-            if (busy) CircularProgressIndicator(Modifier.size(32.dp), color = Color.Black)
+            if (busy) {
+                CircularProgressIndicator(
+                    Modifier.size(32.dp),
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 3.dp,
+                )
+            }
         }
     }
 }
@@ -259,27 +319,33 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     var pan by remember(scan) { mutableStateOf(Offset.Zero) }
     var viewSize by remember { mutableStateOf(Size.Zero) }
 
+    val accent = overlayColor()
     val density = LocalDensity.current
-    val handleRadius = with(density) { 10.dp.toPx() }
+    val handleRadius = with(density) { 11.dp.toPx() }
     val grabRadius = with(density) { 36.dp.toPx() }
-    val outlineWidth = with(density) { 1.dp.toPx() }
 
     fun fit() = Fit.of(viewSize, image.width, image.height)
 
-    // Handle circles hang just below the first and last selected glyph.
-    // Positions are in the canvas' own coords (before zoom/pan), so sizes are divided by zoom
-    // to stay constant on screen.
-    fun handleCenters(range: IntRange): Pair<Offset, Offset> {
+    // Teardrop handles hang below the first and last selected glyph, like system text handles.
+    // Anchor = the glyph corner the handle's point touches. Center = middle of the round part.
+    // All in the canvas' own coords (before zoom/pan); sizes are divided by zoom to stay
+    // constant on screen.
+    fun handleAnchors(range: IntRange): Pair<Offset, Offset> {
         val f = fit()
-        val below = Offset(0f, handleRadius / zoom)
-        val start = f.toView(glyphs[range.first].box.bottomLeft) + below
-        val end = f.toView(glyphs[range.last].box.bottomRight) + below
+        val start = f.toView(glyphs[range.first].quad[3]) // bottom-left
+        val end = f.toView(glyphs[range.last].quad[2]) // bottom-right
         return start to end
+    }
+
+    fun handleCenters(range: IntRange): Pair<Offset, Offset> {
+        val r = handleRadius / zoom
+        val (start, end) = handleAnchors(range)
+        return (start + Offset(-r, r)) to (end + Offset(r, r))
     }
 
     val text = selection?.let { selectedText(glyphs, it) }.orEmpty()
 
-    Column(Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Color.Black).statusBarsPadding()) {
         Box(
             Modifier
                 .weight(1f)
@@ -357,10 +423,13 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
 
                                 val f = fit()
                                 activeHandle = if (toStart <= toEnd) 1 else 2
+                                // Middle of the glyph's left/right edge, following the tilt.
                                 val anchor = if (activeHandle == 1) {
-                                    f.toView(glyphs[range.first].box.centerLeft)
+                                    val q = glyphs[range.first].quad
+                                    f.toView((q[0] + q[3]) / 2f)
                                 } else {
-                                    f.toView(glyphs[range.last].box.centerRight)
+                                    val q = glyphs[range.last].quad
+                                    f.toView((q[1] + q[2]) / 2f)
                                 }
                                 aimOffset = anchor - pos
                             },
@@ -400,47 +469,85 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     filterQuality = FilterQuality.Medium,
                 )
 
-                val outline = Stroke(width = outlineWidth / zoom)
-                for (box in scan.wordBoxes) {
-                    val r = f.toView(box)
-                    drawRect(WordOutlineColor, r.topLeft, r.size, style = outline)
+                // Dim the photo except the detected text lines (tilted with the text).
+                val textAreas = Path()
+                for (quad in scan.lineQuads) textAreas.addPolygon(quad.map { f.toView(it) })
+                clipPath(textAreas, ClipOp.Difference) {
+                    drawRect(
+                        ScrimColor,
+                        topLeft = f.offset,
+                        size = Size(image.width * f.scale, image.height * f.scale),
+                    )
                 }
 
                 val range = selection
                 if (range != null) {
+                    // One tilted shape per line the selection covers, from the run's first
+                    // glyph's left edge to its last glyph's right edge.
+                    val highlight = Path()
+                    var runStart = range.first
                     for (i in range) {
-                        val r = f.toView(glyphs[i].box)
-                        drawRect(HighlightColor, r.topLeft, r.size)
+                        val endsRun = i == range.last || glyphs[i + 1].line != glyphs[i].line
+                        if (!endsRun) continue
+                        val first = glyphs[runStart].quad
+                        val last = glyphs[i].quad
+                        highlight.addPolygon(listOf(first[0], last[1], last[2], first[3]).map { f.toView(it) })
+                        runStart = i + 1
                     }
-                    val (start, end) = handleCenters(range)
-                    drawCircle(HandleColor, handleRadius / zoom, start)
-                    drawCircle(HandleColor, handleRadius / zoom, end)
+                    drawPath(highlight, accent.copy(alpha = 0.4f))
+                    val (start, end) = handleAnchors(range)
+                    val r = handleRadius / zoom
+                    drawPath(teardropHandle(start, r, isStart = true), accent)
+                    drawPath(teardropHandle(end, r, isStart = false), accent)
                 }
             }
         }
 
-        Surface(color = MaterialTheme.colorScheme.surface) {
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
-                val hint = when {
-                    glyphs.isEmpty() -> "No text found. Retake."
-                    text.isEmpty() -> "Long-press a word, drag the handles. Pinch to zoom."
-                    else -> text
-                }
-                Text(
-                    hint,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (text.isEmpty()) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+        Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+            ) {
+                if (text.isEmpty()) {
+                    val hint = if (glyphs.isEmpty()) {
+                        "No text found. Retake."
                     } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-                Spacer(Modifier.height(12.dp))
+                        "Long-press a word, drag the handles. Pinch to zoom."
+                    }
+                    Text(
+                        hint,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    OutlinedButton(onClick = onRetake) { Text("Retake") }
+                    OutlinedButton(
+                        onClick = onRetake,
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                    ) {
+                        Icon(Icons.Outlined.CameraAlt, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+                        Text("Retake")
+                    }
                     Spacer(Modifier.weight(1f))
-                    Button(onClick = { copyToClipboard(context, text) }, enabled = text.isNotEmpty()) {
+                    Button(
+                        onClick = { copyToClipboard(context, text) },
+                        enabled = text.isNotEmpty(),
+                        contentPadding = ButtonDefaults.ButtonWithIconContentPadding,
+                    ) {
+                        Icon(Icons.Outlined.ContentCopy, contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+                        Spacer(Modifier.width(ButtonDefaults.IconSpacing))
                         Text("Copy")
                     }
                 }
@@ -466,6 +573,30 @@ private class Fit(val scale: Float, val offset: Offset) {
             return Fit(scale, offset)
         }
     }
+}
+
+private fun Path.addPolygon(points: List<Offset>) {
+    moveTo(points[0].x, points[0].y)
+    for (p in points.drop(1)) lineTo(p.x, p.y)
+    close()
+}
+
+/**
+ * Selection handle shaped like Android's text handles: a circle with one sharp corner
+ * touching [anchor]. Start handle hangs down-left of it, end handle down-right.
+ */
+private fun teardropHandle(anchor: Offset, radius: Float, isStart: Boolean): Path {
+    val diameter = radius * 2
+    val round = CornerRadius(radius)
+    val sharp = CornerRadius.Zero
+    val shape = if (isStart) {
+        val rect = Rect(anchor.x - diameter, anchor.y, anchor.x, anchor.y + diameter)
+        RoundRect(rect, topLeft = round, topRight = sharp, bottomRight = round, bottomLeft = round)
+    } else {
+        val rect = Rect(anchor.x, anchor.y, anchor.x + diameter, anchor.y + diameter)
+        RoundRect(rect, topLeft = sharp, topRight = round, bottomRight = round, bottomLeft = round)
+    }
+    return Path().apply { addRoundRect(shape) }
 }
 
 private fun uprightBitmap(image: ImageProxy): Bitmap {
