@@ -353,7 +353,7 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
             if (busy) {
                 // Centered over the blacked-out viewfinder.
                 Text(
-                    "Reading text…",
+                    "Processing…",
                     modifier = Modifier.align(Alignment.Center),
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White,
