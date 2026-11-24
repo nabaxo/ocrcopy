@@ -24,5 +24,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+            ML Kit usage statistics go through Google's datatransport library. This service
+            registers its only upload backend (CCT); without it, events have nowhere to go
+            and are dropped. Belt and braces on top of the missing INTERNET permission.
+            The job scheduler service is left in place: removing it could crash when
+            ML Kit schedules an upload.
+        -->
+        <service
+            android:name="com.google.android.datatransport.runtime.backends.TransportBackendDiscovery"
+            tools:node="remove" />
     </application>
 </manifest>
