@@ -22,12 +22,21 @@ class Glyph(val text: String, val quad: Quad, val word: Int, val line: Int, val 
     val box: Rect = boundsOf(quad)
 }
 
-/** A frozen photo plus every character ML Kit found in it, in reading order. */
-class Scan(val bitmap: Bitmap, val glyphs: List<Glyph>, val lineQuads: List<Quad>)
+/**
+ * A frozen photo plus every character ML Kit found in it, in reading order.
+ * [lineQuads] are padded line shapes; [textHeight] is the median line height in image pixels.
+ */
+class Scan(
+    val bitmap: Bitmap,
+    val glyphs: List<Glyph>,
+    val lineQuads: List<Quad>,
+    val textHeight: Float,
+)
 
 fun buildScan(bitmap: Bitmap, text: Text): Scan {
     val glyphs = mutableListOf<Glyph>()
     val lineQuads = mutableListOf<Quad>()
+    val lineHeights = mutableListOf<Float>()
     var wordIndex = 0
 
     for (block in text.textBlocks) {
@@ -60,10 +69,33 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
             // (first letter left outside). The per-character points are accurate, so build
             // the line shape from those instead.
             val lineGlyphs = glyphs.subList(lineStart, glyphs.size)
-            lineQuads += padQuad(enclosingQuad(lineGlyphs, lineQuad))
+            val enclosing = enclosingQuad(lineGlyphs, lineQuad)
+            lineHeights += (enclosing[3] - enclosing[0]).getDistance()
+            // More room along the text than across it.
+            lineQuads += padQuad(enclosing, alongFraction = 0.5f, downFraction = 0.3f)
         }
     }
-    return Scan(bitmap, glyphs, lineQuads)
+    val textHeight = lineHeights.sorted().getOrElse(lineHeights.size / 2) { 0f }
+    return Scan(bitmap, glyphs, lineQuads, textHeight)
+}
+
+/**
+ * Shapes for a selection: one tilted rectangle per line the selection covers, from the
+ * run's first glyph's left edge to its last glyph's right edge, slightly padded.
+ */
+fun selectionQuads(glyphs: List<Glyph>, range: IntRange): List<Quad> {
+    val quads = mutableListOf<Quad>()
+    var runStart = range.first
+    for (i in range) {
+        val endsRun = i == range.last || glyphs[i + 1].line != glyphs[i].line
+        if (!endsRun) continue
+        val first = glyphs[runStart].quad
+        val last = glyphs[i].quad
+        val run = listOf(first[0], last[1], last[2], first[3])
+        quads += padQuad(run, alongFraction = 0.15f, downFraction = 0.15f)
+        runStart = i + 1
+    }
+    return quads
 }
 
 /**
@@ -130,18 +162,19 @@ private fun quadOf(points: Array<Point>?, box: android.graphics.Rect?): Quad? {
     return listOf(Offset(l, t), Offset(r, t), Offset(r, b), Offset(l, b))
 }
 
-/** Grow a quad along its own axes by a fraction of its height, so letters aren't touching the edge. */
-private fun padQuad(quad: Quad, fraction: Float = 0.2f): Quad {
+/**
+ * Grow a quad along its own axes so letters aren't touching the edge. Both paddings are
+ * fractions of the quad's height, so they scale with text size.
+ */
+private fun padQuad(quad: Quad, alongFraction: Float, downFraction: Float): Quad {
     val (tl, tr, br, bl) = quad
-    val along = unit(tr - tl)
-    val down = unit(bl - tl)
-    val pad = (bl - tl).getDistance() * fraction
-    val a = along * pad
-    val d = down * pad
+    val height = (bl - tl).getDistance()
+    val a = unit(tr - tl) * (height * alongFraction)
+    val d = unit(bl - tl) * (height * downFraction)
     return listOf(tl - a - d, tr + a - d, br + a + d, bl - a + d)
 }
 
-private fun unit(v: Offset): Offset {
+internal fun unit(v: Offset): Offset {
     val length = v.getDistance()
     return if (length == 0f) Offset.Zero else v / length
 }

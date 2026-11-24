@@ -82,13 +82,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -116,8 +114,8 @@ import kotlin.math.roundToInt
 private const val MAX_IMAGE_SIDE = 3000
 private const val MAX_ZOOM = 8f
 
-/** Dims the photo everywhere except detected text lines. */
-private val ScrimColor = Color(0x80000000)
+/** Dims the photo everywhere except detected text lines (ARGB: 50% black). */
+private const val ScrimArgb = 0x80000000.toInt()
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -334,8 +332,19 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     var zoom by remember(scan) { mutableFloatStateOf(1f) }
     var pan by remember(scan) { mutableStateOf(Offset.Zero) }
     var viewSize by remember { mutableStateOf(Size.Zero) }
-
     val accent = overlayColor()
+    val highlightColor = accent.copy(alpha = 0.4f)
+    // Corner rounding / merge distance for the gooey shapes, in image pixels.
+    val gooeyRadius = scan.textHeight * 0.3f
+
+    // Dim layer: dark everywhere except the text lines, which are rounded and melted
+    // together. Computed once per photo.
+    val scrim = remember(scan) {
+        gooeyLayer(
+            image.width, image.height, scan.lineQuads, gooeyRadius,
+            inside = 0x00000000, outside = ScrimArgb,
+        ).asImageBitmap()
+    }
     val density = LocalDensity.current
     val handleRadius = with(density) { 11.dp.toPx() }
     val grabRadius = with(density) { 36.dp.toPx() }
@@ -475,42 +484,23 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                     },
             ) {
                 val f = Fit.of(size, image.width, image.height)
-                drawImage(
-                    image = image,
-                    dstOffset = IntOffset(f.offset.x.roundToInt(), f.offset.y.roundToInt()),
-                    dstSize = IntSize(
-                        (image.width * f.scale).roundToInt(),
-                        (image.height * f.scale).roundToInt(),
-                    ),
-                    filterQuality = FilterQuality.Medium,
+                // Photo and the reduced-size layers all stretch over the same area.
+                val dstOffset = IntOffset(f.offset.x.roundToInt(), f.offset.y.roundToInt())
+                val dstSize = IntSize(
+                    (image.width * f.scale).roundToInt(),
+                    (image.height * f.scale).roundToInt(),
                 )
-
-                // Dim the photo except the detected text lines (tilted with the text).
-                val textAreas = Path()
-                for (quad in scan.lineQuads) textAreas.addPolygon(quad.map { f.toView(it) })
-                clipPath(textAreas, ClipOp.Difference) {
-                    drawRect(
-                        ScrimColor,
-                        topLeft = f.offset,
-                        size = Size(image.width * f.scale, image.height * f.scale),
-                    )
-                }
+                drawImage(image, dstOffset = dstOffset, dstSize = dstSize, filterQuality = FilterQuality.Medium)
+                drawImage(scrim, dstOffset = dstOffset, dstSize = dstSize, filterQuality = FilterQuality.Low)
 
                 val range = selection
                 if (range != null) {
-                    // One tilted shape per line the selection covers, from the run's first
-                    // glyph's left edge to its last glyph's right edge.
+                    // One rounded shape per selected line; not merged.
                     val highlight = Path()
-                    var runStart = range.first
-                    for (i in range) {
-                        val endsRun = i == range.last || glyphs[i + 1].line != glyphs[i].line
-                        if (!endsRun) continue
-                        val first = glyphs[runStart].quad
-                        val last = glyphs[i].quad
-                        highlight.addPolygon(listOf(first[0], last[1], last[2], first[3]).map { f.toView(it) })
-                        runStart = i + 1
+                    for (quad in selectionQuads(glyphs, range)) {
+                        highlight.addRoundedPolygon(quad.map { f.toView(it) }, gooeyRadius * f.scale)
                     }
-                    drawPath(highlight, accent.copy(alpha = 0.4f))
+                    drawPath(highlight, highlightColor)
                     val (start, end) = handleAnchors(range)
                     val r = handleRadius / zoom
                     drawPath(teardropHandle(start, r, isStart = true), accent)
@@ -591,9 +581,20 @@ private class Fit(val scale: Float, val offset: Offset) {
     }
 }
 
-private fun Path.addPolygon(points: List<Offset>) {
-    moveTo(points[0].x, points[0].y)
-    for (p in points.drop(1)) lineTo(p.x, p.y)
+/** Polygon with each corner cut by a curve of about [radius]. */
+private fun Path.addRoundedPolygon(points: List<Offset>, radius: Float) {
+    val n = points.size
+    for (i in 0 until n) {
+        val corner = points[i]
+        val prev = points[(i - 1 + n) % n]
+        val next = points[(i + 1) % n]
+        // Never cut more than half an edge, or neighbouring curves overlap.
+        val r = min(radius, min((prev - corner).getDistance(), (next - corner).getDistance()) / 2f)
+        val curveStart = corner + unit(prev - corner) * r
+        val curveEnd = corner + unit(next - corner) * r
+        if (i == 0) moveTo(curveStart.x, curveStart.y) else lineTo(curveStart.x, curveStart.y)
+        quadraticTo(corner.x, corner.y, curveEnd.x, curveEnd.y)
+    }
     close()
 }
 
