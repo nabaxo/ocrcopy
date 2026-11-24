@@ -391,11 +391,28 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                 .weight(1f)
                 .fillMaxWidth()
                 .clipToBounds()
-                // Two fingers: zoom and pan. Runs in the Initial pass so it wins over the
-                // one-finger selection gestures below.
+                // Two fingers: zoom and pan. One finger while zoomed in: pan, unless the drag
+                // starts on a selection handle. Lives here, outside the zoomed layer, so
+                // positions are in screen space; panning from inside the layer would move the
+                // layer under the finger and stutter. Runs in the Initial pass so it wins over
+                // the one-finger selection gestures below.
                 .pointerInput(scan) {
+                    fun clampedPan(p: Offset, z: Float) = Offset(
+                        p.x.coerceIn(size.width * (1f - z), 0f),
+                        p.y.coerceIn(size.height * (1f - z), 0f),
+                    )
+
                     awaitEachGesture {
-                        awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        val startsOnHandle = selection?.let { range ->
+                            val local = (down.position - pan) / zoom
+                            val (start, end) = handleCenters(range)
+                            val limit = grabRadius / zoom
+                            (local - start).getDistance() < limit || (local - end).getDistance() < limit
+                        } ?: false
+                        var panning = false
+                        var travelled = Offset.Zero
+
                         do {
                             val event = awaitPointerEvent(PointerEventPass.Initial)
                             val fingers = event.changes.count { it.pressed }
@@ -404,11 +421,23 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                                 val newZoom = (zoom * event.calculateZoom()).coerceIn(1f, MAX_ZOOM)
                                 val newPan = centroid - (centroid - pan) * (newZoom / zoom) +
                                     event.calculatePan()
-                                val minX = size.width * (1f - newZoom)
-                                val minY = size.height * (1f - newZoom)
                                 zoom = newZoom
-                                pan = Offset(newPan.x.coerceIn(minX, 0f), newPan.y.coerceIn(minY, 0f))
+                                pan = clampedPan(newPan, newZoom)
+                                // Lifting one finger afterwards keeps panning with the other.
+                                panning = true
                                 event.changes.forEach { it.consume() }
+                            } else if (fingers == 1 && zoom > 1f && !startsOnHandle) {
+                                val change = event.changes.first { it.pressed }
+                                val delta = change.position - change.previousPosition
+                                if (!panning) {
+                                    // Wait for a real drag so taps and long-presses still work.
+                                    travelled += delta
+                                    panning = travelled.getDistance() > viewConfiguration.touchSlop
+                                }
+                                if (panning) {
+                                    pan = clampedPan(pan + delta, zoom)
+                                    change.consume()
+                                }
                             }
                         } while (event.changes.any { it.pressed })
                     }
