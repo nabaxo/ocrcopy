@@ -39,7 +39,7 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
             if (elements.isEmpty()) continue
 
             val lineIndex = lineQuads.size
-            lineQuads += padQuad(lineQuad)
+            val lineStart = glyphs.size
 
             elements.forEachIndexed { elementIndex, element ->
                 val chars = splitIntoChars(element)
@@ -55,10 +55,47 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
                 }
                 wordIndex++
             }
+
+            // ML Kit's line corner points are sometimes short at the start on tilted text
+            // (first letter left outside). The per-character points are accurate, so build
+            // the line shape from those instead.
+            val lineGlyphs = glyphs.subList(lineStart, glyphs.size)
+            lineQuads += padQuad(enclosingQuad(lineGlyphs, lineQuad))
         }
     }
     return Scan(bitmap, glyphs, lineQuads)
 }
+
+/**
+ * Smallest rectangle, tilted along the text direction, that holds every glyph of a line.
+ * Direction comes from the first to last glyph's bottom-left corner; falls back to
+ * the ML Kit line quad's top edge for one-character lines.
+ */
+private fun enclosingQuad(lineGlyphs: List<Glyph>, lineQuad: Quad): Quad {
+    val baseline = lineGlyphs.last().quad[3] - lineGlyphs.first().quad[3]
+    val along = if (baseline.getDistance() > 1f) unit(baseline) else unit(lineQuad[1] - lineQuad[0])
+    val down = Offset(-along.y, along.x) // along rotated 90° clockwise (y points down)
+
+    val origin = lineGlyphs.first().quad[0]
+    var minA = Float.MAX_VALUE
+    var maxA = -Float.MAX_VALUE
+    var minD = Float.MAX_VALUE
+    var maxD = -Float.MAX_VALUE
+    for (glyph in lineGlyphs) {
+        for (p in glyph.quad) {
+            val a = dot(p - origin, along)
+            val d = dot(p - origin, down)
+            minA = minOf(minA, a)
+            maxA = maxOf(maxA, a)
+            minD = minOf(minD, d)
+            maxD = maxOf(maxD, d)
+        }
+    }
+    fun corner(a: Float, d: Float) = origin + along * a + down * d
+    return listOf(corner(minA, minD), corner(maxA, minD), corner(maxA, maxD), corner(minA, maxD))
+}
+
+private fun dot(a: Offset, b: Offset) = a.x * b.x + a.y * b.y
 
 /**
  * Per-character quads. ML Kit usually gives symbols with corner points; if it doesn't,
