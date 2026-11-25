@@ -64,24 +64,30 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
             val lineStart = glyphs.size
 
             elements.forEachIndexed { elementIndex, element ->
-                val chars = splitIntoChars(element)
-                val isLastWordOfLine = elementIndex == elements.lastIndex
-                chars.forEachIndexed { charIndex, (char, quad) ->
-                    val isLastCharOfWord = charIndex == chars.lastIndex
-                    val after = when {
-                        !isLastCharOfWord -> ""
-                        isLastWordOfLine -> "\n"
-                        else -> " "
+                // ML Kit occasionally returns two words as one element with a space inside
+                // ("SEK 52063492814"). Split there, so double-tap/long-press stop at the space.
+                val words = splitAtSpaces(splitIntoChars(element))
+                words.forEachIndexed { wordInElement, chars ->
+                    val isLastWordOfLine =
+                        elementIndex == elements.lastIndex && wordInElement == words.lastIndex
+                    chars.forEachIndexed { charIndex, (char, quad) ->
+                        val isLastCharOfWord = charIndex == chars.lastIndex
+                        val after = when {
+                            !isLastCharOfWord -> ""
+                            isLastWordOfLine -> "\n"
+                            else -> " "
+                        }
+                        glyphs += Glyph(char, quad, wordIndex, lineIndex, after)
                     }
-                    glyphs += Glyph(char, quad, wordIndex, lineIndex, after)
+                    wordIndex++
                 }
-                wordIndex++
             }
 
             // ML Kit's line corner points are sometimes short at the start on tilted text
             // (first letter left outside). The per-character points are accurate, so build
             // the line shape from those instead.
             val lineGlyphs = glyphs.subList(lineStart, glyphs.size)
+            if (lineGlyphs.isEmpty()) continue
             val enclosing = enclosingQuad(lineGlyphs, lineQuad)
             lineHeights += (enclosing[3] - enclosing[0]).getDistance()
             lineQuads += padQuad(enclosing, TEXT_PAD_ALONG, TEXT_PAD_ACROSS)
@@ -89,6 +95,22 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
     }
     val textHeight = lineHeights.sorted().getOrElse(lineHeights.size / 2) { 0f }
     return Scan(bitmap, glyphs, lineQuads, textHeight)
+}
+
+/** Split a word's characters at whitespace characters, dropping them and empty pieces. */
+private fun splitAtSpaces(chars: List<Pair<String, Quad>>): List<List<Pair<String, Quad>>> {
+    val words = mutableListOf<List<Pair<String, Quad>>>()
+    var current = mutableListOf<Pair<String, Quad>>()
+    for (char in chars) {
+        if (char.first.isBlank()) {
+            if (current.isNotEmpty()) words += current
+            current = mutableListOf()
+        } else {
+            current += char
+        }
+    }
+    if (current.isNotEmpty()) words += current
+    return words
 }
 
 /**
