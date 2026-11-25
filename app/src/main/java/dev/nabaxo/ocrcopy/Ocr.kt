@@ -26,10 +26,13 @@ class Glyph(val text: String, val quad: Quad, val word: Int, val line: Int, val 
  * Padding around text, as fractions of the line height: more along the text than across it.
  * The bright (undimmed) line areas lose some size at their corners to the gooey rounding,
  * so the selection highlight gets less padding to sit clearly inside them.
+ * Along the text the highlight still gets a fair margin: ML Kit's word and character boxes
+ * can be off by about half a letter on tilted text, and this hides that.
  */
-private const val TEXT_PAD_ALONG = 0.4f
+// Bright area along the text = selection padding + ~0.3 lost to the gooey corner rounding.
+private const val TEXT_PAD_ALONG = 0.6f
 private const val TEXT_PAD_ACROSS = 0.3f
-private const val SELECTION_PAD_ALONG = 0.2f
+private const val SELECTION_PAD_ALONG = 0.3f
 private const val SELECTION_PAD_ACROSS = 0.15f
 
 /**
