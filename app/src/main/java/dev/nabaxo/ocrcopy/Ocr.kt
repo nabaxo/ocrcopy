@@ -34,6 +34,9 @@ private const val TEXT_PAD_ALONG = 0.6f
 private const val TEXT_PAD_ACROSS = 0.3f
 private const val SELECTION_PAD_ALONG = 0.3f
 private const val SELECTION_PAD_ACROSS = 0.15f
+// Selection end that cuts through a word: less padding, so it doesn't spill over the
+// unselected neighbour, but some, so a char box that is off a bit doesn't show bare.
+private const val SELECTION_PAD_MID_WORD = 0.1f
 
 /**
  * A frozen photo plus every character ML Kit found in it, in reading order.
@@ -117,6 +120,8 @@ private fun splitAtSpaces(chars: List<Pair<String, Quad>>): List<List<Pair<Strin
  * Shapes for a selection: one tilted rectangle per line the selection covers, from the
  * run's first glyph's left edge to its last glyph's right edge, padded a bit less than
  * the line areas so it stays inside them.
+ * An end that cuts through a word gets less padding along the text: full padding would
+ * spill over the neighbouring, unselected character and make it look selected.
  */
 fun selectionQuads(glyphs: List<Glyph>, range: IntRange): List<Quad> {
     val quads = mutableListOf<Quad>()
@@ -127,7 +132,11 @@ fun selectionQuads(glyphs: List<Glyph>, range: IntRange): List<Quad> {
         val first = glyphs[runStart].quad
         val last = glyphs[i].quad
         val run = listOf(first[0], last[1], last[2], first[3])
-        quads += padQuad(run, SELECTION_PAD_ALONG, SELECTION_PAD_ACROSS)
+        val startsMidWord = runStart > 0 && glyphs[runStart - 1].word == glyphs[runStart].word
+        val endsMidWord = i < glyphs.lastIndex && glyphs[i + 1].word == glyphs[i].word
+        val startPad = if (startsMidWord) SELECTION_PAD_MID_WORD else SELECTION_PAD_ALONG
+        val endPad = if (endsMidWord) SELECTION_PAD_MID_WORD else SELECTION_PAD_ALONG
+        quads += padQuad(run, startPad, endPad, SELECTION_PAD_ACROSS)
         runStart = i + 1
     }
     return quads
@@ -233,12 +242,18 @@ private fun quadOf(points: Array<Point>?, box: android.graphics.Rect?): Quad? {
  * Grow a quad along its own axes so letters aren't touching the edge. Both paddings are
  * fractions of the quad's height, so they scale with text size.
  */
-private fun padQuad(quad: Quad, alongFraction: Float, downFraction: Float): Quad {
+private fun padQuad(quad: Quad, alongFraction: Float, downFraction: Float): Quad =
+    padQuad(quad, alongFraction, alongFraction, downFraction)
+
+/** Like [padQuad], with separate padding at the start and the end along the text. */
+private fun padQuad(quad: Quad, startFraction: Float, endFraction: Float, downFraction: Float): Quad {
     val (tl, tr, br, bl) = quad
     val height = (bl - tl).getDistance()
-    val a = unit(tr - tl) * (height * alongFraction)
+    val along = unit(tr - tl)
+    val s = along * (height * startFraction)
+    val e = along * (height * endFraction)
     val d = unit(bl - tl) * (height * downFraction)
-    return listOf(tl - a - d, tr + a - d, br + a + d, bl - a + d)
+    return listOf(tl - s - d, tr + e - d, br + e + d, bl - s + d)
 }
 
 internal fun unit(v: Offset): Offset {

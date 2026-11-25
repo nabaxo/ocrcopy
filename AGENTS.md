@@ -70,6 +70,8 @@ tell the owner what is missing and let them fix it.
   line cornerPoints are often short at the start). Padding as fractions of line
   height: bright area 60% along / 30% across the text; highlight 30% / 15%. The
   bright area needs the extra ~30% because the gooey rounding eats its corners.
+  A selection end that cuts through a word gets only 10% along (full padding spilled
+  over the unselected neighbour; 0% showed ML Kit's box error bare).
 - Highlight: one rounded shape per selected line, not merged, `BlendMode.Multiply`
   (highlighter look: paper takes the color, black text stays black).
 - Selection: long-press or double-tap selects a word; teardrop handles; Copy chip
@@ -82,11 +84,20 @@ tell the owner what is missing and let them fix it.
 
 - ML Kit's word/character boxes can be off by ~half a letter on tilted text, and
   character boxes are often just even slices of the word box. Confirmed with a debug
-  overlay. Padding hides it; there is no clean fix from geometry alone.
+  overlay. Padding hides it; there is no clean fix from geometry alone. Even real
+  per-symbol boxes jitter ±~1/5 char (logged on "52063492814": even digits, gaps
+  alternating ~70/100 px), so a mid-word selection edge can look off. Accepted.
+  Idea not taken: find mid-word boundaries from the photo (least-ink column between
+  neighbouring chars). Other engines wouldn't help: all give char boxes only as
+  estimates from line-level recognition.
 - End-character trimming, tried and rejected: height-based limit (missed the cases),
   uppercase exception (worse), pixel scan for the ink edge (counted printed table
   lines as part of the word). The median rule's known flaw: it can clip a capital
   that starts a lowercase word.
+- ML Kit sometimes glues words split only by a printed table line into one element
+  with no space (seen: "SEK" + number → `SEK52063492814`). Accepted as a known issue.
+  Ideas not taken: split at letter↔digit change (breaks `A4`, `MP3`), split at wide
+  gaps between char boxes (char boxes often fake).
 - Merging the selection highlight like the dim layer: removed on purpose.
 - Live OCR boxes on the viewfinder: skipped by choice.
 - Open-source OCR (PaddleOCR via ONNX, Tesseract): judged worse or a lot more work.
@@ -94,9 +105,6 @@ tell the owner what is missing and let them fix it.
 
 ## Open items
 
-- A double-tap once selected "SEK" together with the number next to it. Not
-  reproducible; the space split is the guessed fix. If it recurs, log ML Kit's
-  element texts to confirm.
 - Distribution: no Play Store. Maybe a signed APK on the owner's Forgejo later.
 
 ## Working style
