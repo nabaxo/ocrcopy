@@ -24,7 +24,7 @@ android {
         minSdk = 26
         targetSdk = 35
         versionCode = 1
-        versionName = "1.0"
+        versionName = "1.0.0"
 
         // Modern phones only. Drops 32-bit ARM and x86 copies of the ML Kit/CameraX native libs.
         ndk {
