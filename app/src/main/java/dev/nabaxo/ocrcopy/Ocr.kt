@@ -147,7 +147,8 @@ private fun splitIntoChars(element: Text.Element): List<Pair<String, Quad>> {
     val symbols = element.symbols
     val symbolQuads = symbols.map { quadOf(it.cornerPoints, it.boundingBox) }
     if (symbols.isNotEmpty() && symbolQuads.all { it != null }) {
-        return symbols.mapIndexed { i, symbol -> symbol.text to symbolQuads[i]!! }
+        val quads = trimOversizedEnds(symbolQuads.map { it!! })
+        return symbols.mapIndexed { i, symbol -> symbol.text to quads[i] }
     }
 
     val (tl, tr, br, bl) = quadOf(element.cornerPoints, element.boundingBox)!!
@@ -157,6 +158,37 @@ private fun splitIntoChars(element: Text.Element): List<Pair<String, Quad>> {
         val t1 = (i + 1).toFloat() / chars.size
         char to listOf(lerp(tl, tr, t0), lerp(tl, tr, t1), lerp(bl, br, t1), lerp(bl, br, t0))
     }
+}
+
+/**
+ * ML Kit sometimes stretches a word's first or last character box over something next to
+ * it, like a printed table line ("| 5206..." gives a "5" box reaching the line). The text
+ * is still right, but the highlight and handles end up too far out. If an end character is
+ * more than 1.5x the word's median character width, trim it from its outer side.
+ * Needs 3+ characters for a meaningful median.
+ *
+ * Tried and rejected: a height-based limit (missed these cases), an uppercase exception
+ * (worse), and scanning photo pixels for the ink edge (counted the line as part of the word).
+ * Known flaw: may clip a little off a capital that starts a lowercase word ("Anges").
+ */
+private fun trimOversizedEnds(quads: List<Quad>): List<Quad> {
+    if (quads.size < 3) return quads
+    fun width(q: Quad) = (q[1] - q[0]).getDistance()
+    val medianWidth = quads.map { width(it) }.sorted()[quads.size / 2]
+    val maxWidth = medianWidth * 1.5f
+    val result = quads.toMutableList()
+
+    if (width(result.first()) > maxWidth) {
+        // Keep the right edge, pull the left edge in.
+        val (tl, tr, br, bl) = result.first()
+        result[0] = listOf(tr - unit(tr - tl) * maxWidth, tr, br, br - unit(br - bl) * maxWidth)
+    }
+    if (width(result.last()) > maxWidth) {
+        // Keep the left edge, pull the right edge in.
+        val (tl, tr, br, bl) = result.last()
+        result[result.lastIndex] = listOf(tl, tl + unit(tr - tl) * maxWidth, bl + unit(br - bl) * maxWidth, bl)
+    }
+    return result
 }
 
 /** Prefer ML Kit's tilted corner points; fall back to the upright box. */
