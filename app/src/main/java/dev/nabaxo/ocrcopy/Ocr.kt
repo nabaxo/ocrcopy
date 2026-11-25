@@ -23,6 +23,16 @@ class Glyph(val text: String, val quad: Quad, val word: Int, val line: Int, val 
 }
 
 /**
+ * Padding around text, as fractions of the line height: more along the text than across it.
+ * The bright (undimmed) line areas lose some size at their corners to the gooey rounding,
+ * so the selection highlight gets less padding to sit clearly inside them.
+ */
+private const val TEXT_PAD_ALONG = 0.4f
+private const val TEXT_PAD_ACROSS = 0.3f
+private const val SELECTION_PAD_ALONG = 0.2f
+private const val SELECTION_PAD_ACROSS = 0.15f
+
+/**
  * A frozen photo plus every character ML Kit found in it, in reading order.
  * [lineQuads] are padded line shapes; [textHeight] is the median line height in image pixels.
  */
@@ -71,8 +81,7 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
             val lineGlyphs = glyphs.subList(lineStart, glyphs.size)
             val enclosing = enclosingQuad(lineGlyphs, lineQuad)
             lineHeights += (enclosing[3] - enclosing[0]).getDistance()
-            // More room along the text than across it.
-            lineQuads += padQuad(enclosing, alongFraction = 0.5f, downFraction = 0.3f)
+            lineQuads += padQuad(enclosing, TEXT_PAD_ALONG, TEXT_PAD_ACROSS)
         }
     }
     val textHeight = lineHeights.sorted().getOrElse(lineHeights.size / 2) { 0f }
@@ -81,7 +90,8 @@ fun buildScan(bitmap: Bitmap, text: Text): Scan {
 
 /**
  * Shapes for a selection: one tilted rectangle per line the selection covers, from the
- * run's first glyph's left edge to its last glyph's right edge, slightly padded.
+ * run's first glyph's left edge to its last glyph's right edge, padded a bit less than
+ * the line areas so it stays inside them.
  */
 fun selectionQuads(glyphs: List<Glyph>, range: IntRange): List<Quad> {
     val quads = mutableListOf<Quad>()
@@ -92,7 +102,7 @@ fun selectionQuads(glyphs: List<Glyph>, range: IntRange): List<Quad> {
         val first = glyphs[runStart].quad
         val last = glyphs[i].quad
         val run = listOf(first[0], last[1], last[2], first[3])
-        quads += padQuad(run, alongFraction = 0.15f, downFraction = 0.15f)
+        quads += padQuad(run, SELECTION_PAD_ALONG, SELECTION_PAD_ACROSS)
         runStart = i + 1
     }
     return quads
