@@ -4,6 +4,16 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
+// Release signing secrets live outside the repo, in ~/.gradle/gradle.properties.
+val signingKeys = listOf(
+    "OCRCOPY_STORE_FILE",
+    "OCRCOPY_STORE_PASSWORD",
+    "OCRCOPY_KEY_ALIAS",
+    "OCRCOPY_KEY_PASSWORD",
+)
+val signing = signingKeys.associateWith { providers.gradleProperty(it).orNull }
+val missingSigningKeys = signing.filterValues { it.isNullOrBlank() }.keys
+
 android {
     namespace = "dev.nabaxo.ocrcopy"
     compileSdk = 35
@@ -22,13 +32,23 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            if (missingSigningKeys.isEmpty()) {
+                storeFile = file(signing.getValue("OCRCOPY_STORE_FILE")!!)
+                storePassword = signing.getValue("OCRCOPY_STORE_PASSWORD")
+                keyAlias = signing.getValue("OCRCOPY_KEY_ALIAS")
+                keyPassword = signing.getValue("OCRCOPY_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
-            // Signed with the debug key so the release APK installs without extra setup.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -38,6 +58,19 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+}
+
+// Fail release packaging loudly instead of producing an unsigned or debug-signed APK.
+// Debug builds and other tasks are unaffected.
+tasks.matching { it.name == "packageRelease" || it.name == "packageReleaseBundle" }.configureEach {
+    doFirst {
+        if (missingSigningKeys.isNotEmpty()) {
+            throw GradleException(
+                "Release signing not configured. Add to ~/.gradle/gradle.properties: " +
+                    missingSigningKeys.joinToString(", "),
+            )
+        }
     }
 }
 
