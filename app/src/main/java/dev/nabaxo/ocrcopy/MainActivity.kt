@@ -33,7 +33,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.magnifier
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -87,6 +89,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
@@ -105,6 +108,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -406,6 +410,7 @@ private fun CameraScreen(busy: Boolean, onShutter: (ImageCapture) -> Unit) {
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class) // Modifier.magnifier
 @Composable
 private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     BackHandler(onBack = onRetake)
@@ -420,6 +425,8 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
     var pan by remember(scan) { mutableStateOf(Offset.Zero) }
     var viewSize by remember { mutableStateOf(Size.Zero) }
     var chipSize by remember { mutableStateOf(IntSize.Zero) }
+    // Where the dragged handle aims, in canvas coords; Unspecified when not dragging.
+    var magnifierAt by remember(scan) { mutableStateOf(Offset.Unspecified) }
     val accent = overlayColor()
     // Corner rounding / merge distance for the gooey shapes, in image pixels.
     val gooeyRadius = scan.textHeight * 0.3f
@@ -471,6 +478,25 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
             Modifier
                 .weight(1f)
                 .fillMaxWidth()
+                // Android's text magnifier above the handle being dragged. magnifierAt is in
+                // canvas coords; convert to this box's coords (apply zoom and pan).
+                .magnifier(
+                    sourceCenter = {
+                        if (magnifierAt.isSpecified) magnifierAt * zoom + pan else Offset.Unspecified
+                    },
+                    // Window centred 84dp above the magnified spot, so its bottom edge sits
+                    // ~48dp clear of the line and the finger.
+                    magnifierCenter = {
+                        if (magnifierAt.isSpecified) {
+                            magnifierAt * zoom + pan - Offset(0f, 84.dp.toPx())
+                        } else {
+                            Offset.Unspecified
+                        }
+                    },
+                    zoom = 1.5f,
+                    // Bigger than Android's ~100x48dp default, to show more of the line.
+                    size = DpSize(140.dp, 72.dp),
+                )
                 .clipToBounds()
                 // Two fingers: zoom and pan. One finger while zoomed in: pan, unless the drag
                 // starts on a selection handle. Lives here, outside the zoomed layer, so
@@ -584,10 +610,12 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                                     f.toView((q[1] + q[2]) / 2f)
                                 }
                                 aimOffset = anchor - pos
+                                magnifierAt = anchor
                             },
                             onDrag = { change, _ ->
                                 if (activeHandle == 0) return@detectDragGestures
                                 change.consume()
+                                magnifierAt = change.position + aimOffset
                                 val range = selection ?: return@detectDragGestures
                                 val f = fit()
                                 val aim = f.toImage(change.position + aimOffset)
@@ -605,8 +633,14 @@ private fun SelectScreen(scan: Scan, onRetake: () -> Unit) {
                                 }
                                 selection = first..last
                             },
-                            onDragEnd = { activeHandle = 0 },
-                            onDragCancel = { activeHandle = 0 },
+                            onDragEnd = {
+                                activeHandle = 0
+                                magnifierAt = Offset.Unspecified
+                            },
+                            onDragCancel = {
+                                activeHandle = 0
+                                magnifierAt = Offset.Unspecified
+                            },
                         )
                     },
             ) {
