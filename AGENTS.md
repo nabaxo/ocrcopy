@@ -29,7 +29,6 @@ Android SDK at `~/Android/Sdk` (cmdline-tools, no Android Studio).
 - `.../Gooey.kt`: the dim layer. Draws line shapes into a mask, blurs, thresholds,
   so text areas get rounded corners and merge where close ("metaball" look).
 - `app/src/main/res/`: adaptive launcher icon (light/dark colors + monochrome).
-- `art/icon-b.svg`: unused alternative icon design, kept on purpose.
 
 ## Build, install, test
 
